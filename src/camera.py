@@ -33,8 +33,11 @@ class Camera:
 
         frame_us = int(1_000_000 / config.CAM_FPS)
         controls = {"FrameDurationLimits": (frame_us, frame_us)}
-        if config.CAM_EXPOSURE_US:
-            # Vaste korte sluitertijd: scherpe ballen, geen veegsporen.
+        if config.CAM_EXPOSURE_US and self.gray:
+            # Vaste korte sluitertijd ALLEEN in detectiemodus (gray=True):
+            # scherpe ballen, geen veegsporen. De kalibratiescripts draaien
+            # in kleurmodus en houden auto-belichting, want daar telt een
+            # goed belicht beeld zwaarder dan bewegingsscherpte.
             # Sluitertijd kan nooit langer zijn dan de frameduur.
             controls["AeEnable"] = False
             controls["ExposureTime"] = min(config.CAM_EXPOSURE_US,
@@ -73,7 +76,10 @@ class Camera:
             if self.gray:
                 # YUV420: array is (h*1.5, w); het Y-vlak is de eerste h rijen.
                 return True, arr[:config.CAM_HEIGHT, :config.CAM_WIDTH]
-            return True, cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+            # Picamera2-eigenaardigheid: formaat "RGB888" levert de bytes
+            # al in BGR-volgorde, precies wat OpenCV verwacht. NIET nogmaals
+            # converteren, anders wisselen rood en blauw om (paars beeld).
+            return True, arr
         else:
             ok, frame = self._cap.read()
             if ok and self.gray and frame is not None:
