@@ -20,6 +20,7 @@ slagzone/
     ├── detector.py               # impact-detectie (frame-differencing)
     ├── calibrate_lens.py         # stap 1: lens kalibreren
     ├── calibrate_homography.py   # stap 2: beamer <-> camera koppelen
+    ├── fps_test.py               # meet werkelijke framerate/verwerkingstijd
     ├── shared.py                 # gedeelde state (detectie <-> telefoon)
     ├── webserver.py              # mobiele trainingsinterface (Flask)
     └── main.py                   # stap 3: draaien
@@ -109,6 +110,27 @@ Toetsen: `r` achtergrond resetten, `c` treffers wissen, `q` stoppen.
 | Telt 1 inslag dubbel | `IMPACT_COOLDOWN_FRAMES` omhoog |
 | Slagzone verkeerde plek/grootte | `ZONE_X/Y/W/H` |
 | Beamer andere resolutie | `PROJECTOR_WIDTH/HEIGHT` |
+
+## Framerate en scherpte (belangrijk voor accuratesse)
+
+De OV5647 haalt op 640x480 zo'n 58 fps, tegen ~30 fps op 1280x720. De
+standaardconfig staat daarom nu op 640x480 @ 58 fps. Minstens zo belangrijk
+is de **sluitertijd**: `CAM_EXPOSURE_US = 6000` legt elke bal in 6 ms vast,
+zodat hij een scherpe ronde blob is in plaats van een lange veeg die het
+rondheidsfilter afkeurt. Korte sluitertijd vraagt wel licht: is het beeld
+te donker, verhoog dan `CAM_GAIN` (meer ruis) of zorg voor extra verlichting
+op de plaat.
+
+Meet wat je opstelling werkelijk haalt met:
+
+```bash
+python3 fps_test.py
+```
+
+**Na elke wijziging van CAM_WIDTH/CAM_HEIGHT moet je `calibrate_lens.py`
+en `calibrate_homography.py` opnieuw draaien**, omdat beide kalibraties in
+camerapixels werken. De software waarschuwt en schakelt de lenscorrectie
+uit als de resoluties niet overeenkomen.
 
 ## Bekende beperkingen
 

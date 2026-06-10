@@ -65,9 +65,13 @@ class ImpactDetector:
                             n if n is not None else
                             config.SUPPRESS_AFTER_DRAW_FRAMES)
 
-    def process(self, frame_bgr):
-        """Geeft (cx, cy) van een BEVESTIGDE impact terug, of None."""
-        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    def process(self, frame):
+        """Geeft (cx, cy) van een BEVESTIGDE impact terug, of None.
+        frame mag BGR (h,w,3) of al grijswaarden (h,w) zijn."""
+        if frame.ndim == 3:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = frame
         gray = cv2.GaussianBlur(gray, (5, 5), 0)
 
         if self.bg is None:

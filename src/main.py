@@ -101,7 +101,7 @@ def main():
         raise SystemExit("Geen homography.npz. Run eerst calibrate_homography.py")
     H = np.load(config.HOMOGRAPHY_FILE)["H"]
 
-    cam = Camera()
+    cam = Camera(gray=True)   # Y-vlak direct: geen kleurconversie per frame
     lens = LensCorrector()
     roi = build_roi_mask(H, config.CAM_WIDTH, config.CAM_HEIGHT)
     detector = ImpactDetector(roi_mask=roi)

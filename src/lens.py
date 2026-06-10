@@ -21,6 +21,19 @@ class LensCorrector:
         K = data["K"]
         D = data["D"]
         dims = tuple(int(x) for x in data["dims"])
+        if dims != (config.CAM_WIDTH, config.CAM_HEIGHT):
+            # De kalibratie is op een andere resolutie gemaakt. Domweg
+            # schalen is riskant: verschillende sensormodi van de OV5647
+            # hebben een ander beeldveld (1280x720 is een 16:9 crop,
+            # 640x480 gebruikt de volle 4:3 sensor). Correctie wordt dan
+            # uitgeschakeld; draai calibrate_lens.py opnieuw op de
+            # huidige resolutie.
+            print(f"WAARSCHUWING: lens_calib.npz is gemaakt op {dims}, "
+                  f"maar de camera staat op "
+                  f"{(config.CAM_WIDTH, config.CAM_HEIGHT)}. "
+                  f"Fisheye-correctie staat UIT. Draai calibrate_lens.py "
+                  f"opnieuw op deze resolutie.")
+            return
         # Nieuwe cameramatrix die zoveel mogelijk beeld behoudt.
         new_K = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(
             K, D, dims, np.eye(3), balance=0.0)
