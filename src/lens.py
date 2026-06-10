@@ -1,0 +1,36 @@
+"""
+Laadt de lenskalibratie en levert een snelle undistort-functie.
+Pre-computet de remap-tabellen, zodat het per frame goedkoop is.
+"""
+import os
+import cv2
+import numpy as np
+import config
+
+
+class LensCorrector:
+    def __init__(self):
+        self.enabled = False
+        self.map1 = None
+        self.map2 = None
+        if os.path.exists(config.LENS_CALIB_FILE):
+            self._load()
+
+    def _load(self):
+        data = np.load(config.LENS_CALIB_FILE)
+        K = data["K"]
+        D = data["D"]
+        dims = tuple(int(x) for x in data["dims"])
+        # Nieuwe cameramatrix die zoveel mogelijk beeld behoudt.
+        new_K = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(
+            K, D, dims, np.eye(3), balance=0.0)
+        self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
+            K, D, np.eye(3), new_K, dims, cv2.CV_16SC2)
+        self.enabled = True
+
+    def correct(self, frame):
+        if not self.enabled:
+            return frame
+        return cv2.remap(frame, self.map1, self.map2,
+                         interpolation=cv2.INTER_LINEAR,
+                         borderMode=cv2.BORDER_CONSTANT)

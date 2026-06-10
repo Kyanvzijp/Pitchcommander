@@ -1,0 +1,7 @@
+# Op Raspberry Pi OS Bookworm bij voorkeur via apt installeren:
+#   sudo apt install -y python3-opencv python3-picamera2 python3-numpy
+#
+# Deze lijst is voor pip/non-Pi omgevingen of als aanvulling.
+# picamera2 is NIET via pip beschikbaar; gebruik daarvoor apt op de Pi.
+numpy>=1.24
+opencv-python>=4.8
