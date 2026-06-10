@@ -1,9 +1,84 @@
 # Slagzone-detectie op Raspberry Pi 5
 
-Beamer projecteert een rechthoekige slagzone op een houten plaat. De
-OV5647-fisheyecamera kijkt naar diezelfde plaat en detecteert waar de bal
-inslaat. Het raakpunt wordt teruggeprojecteerd als rode (strike) of oranje
-(ball) stip.
+Een beamer projecteert een slagzone op een houten plaat. De camera op de
+Pi volgt elke geworpen bal, bepaalt het exacte impactpunt op de plaat en
+projecteert daar een markering. Via een webpagina op je telefoon plaats je
+doelwitten waar de pitcher op moet gooien, met automatische raak/mis-telling.
+
+---
+
+## Stand van zaken (bijgewerkt 10 juni 2026)
+
+**Werkt en is getest:**
+- Volledige pijplijn: kalibratie, trajectvolging, projectie, telefoonbediening
+- Detector v3: volgt de bal frame voor frame en legt de impact op het
+  fysieke raakmoment (de knik in de baan), niet op het moment van
+  verschijnen in beeld
+- Camera op 640x480 @ 58 fps met vaste korte sluitertijd (6 ms) zodat de
+  bal scherp blijft in plaats van een veeg
+- Mobiele trainingsinterface met doelwitten en raak/mis-score
+- Debugviewer met live visualisatie, live tuning en video-opname
+
+**Morgen testen / openstaand:**
+1. `fps_test.py` draaien: halen we echt ~58 fps en is het beeld licht
+   genoeg met de 6 ms sluitertijd? Zo niet: `CAM_GAIN` omhoog of licht erbij.
+2. Beide kalibraties opnieuw doen (de cameraresolutie is gewijzigd naar
+   640x480, dus oude kalibraties zijn ongeldig; de software waarschuwt zelf).
+3. Echte worpen testen met `debug_view.py` + opname ('o'): klopt het
+   impactpunt? Volgt de gele baan de bal netjes?
+4. Beamer keystone-correctie aanzetten (staat 17 graden gekanteld) en met
+   een rolmaat checken of de zone op de plaat ~43 cm breed is; anders
+   `ZONE_W`/`ZONE_H` in dezelfde verhouding bijschalen.
+
+**Bekende aandachtspunten:**
+- Remote desktop = beameruitgang op deze opstelling. Kalibreer en draai
+  altijd in dezelfde schermconfiguratie, anders klopt de homografie niet.
+- In `debug_view.py`: het Tracking-venster wordt mee geprojecteerd op de
+  plaat (spiegel-lus). Verberg het met 'v' tijdens worpen of gebruik de
+  opname en kijk terug.
+
+---
+
+## Verse start: checklist in volgorde
+
+```bash
+cd src
+```
+
+**1. Camera testen**
+```bash
+rpicam-hello --timeout 2000        # geeft de camera beeld?
+python3 fps_test.py                # halen we ~58 fps, beeld licht genoeg?
+```
+
+**2. Lens kalibreren** (eenmalig per camera/resolutie)
+
+Pak het geprinte 9x6 schaakbord (zit als `schaakbord_9x6.pdf` bij dit
+project; print op 100%, plak vlak op karton).
+```bash
+python3 calibrate_lens.py
+```
+Houd het bord onder verschillende hoeken voor de camera. SPATIE per goed
+frame (15+ stuks, bord volledig in beeld met witte rand), dan `c`.
+Maakt `lens_calib.npz`.
+
+**3. Beamer en camera koppelen** (opnieuw doen na elke verplaatsing van
+beamer, camera of plaat, en na elke resolutiewijziging)
+
+Beamer aan, gericht op de plaat, in de schermconfiguratie waarin je straks
+ook draait.
+```bash
+python3 calibrate_homography.py
+```
+Wacht op "Patroon gevonden", druk `c`. Maakt `homography.npz`.
+
+**4. Draaien**
+```bash
+python3 main.py        # trainingsmodus (telefoon-URL staat in de terminal)
+python3 debug_view.py  # of: debugmodus met live tracking-visualisatie
+```
+
+---
 
 ## Projectstructuur
 
@@ -14,155 +89,110 @@ slagzone/
 ├── requirements.txt
 ├── .gitignore
 └── src/
-    ├── config.py                 # alle instellingen op een plek
+    ├── config.py                 # ALLE instellingen op een plek
     ├── camera.py                 # camera-abstractie (Picamera2 / OpenCV)
     ├── lens.py                   # fisheye-correctie
-    ├── detector.py               # impact-detectie (frame-differencing)
-    ├── calibrate_lens.py         # stap 1: lens kalibreren
-    ├── calibrate_homography.py   # stap 2: beamer <-> camera koppelen
+    ├── detector.py               # trajectvolging + impactbepaling
+    ├── calibrate_lens.py         # stap 2: lens kalibreren
+    ├── calibrate_homography.py   # stap 3: beamer <-> camera koppelen
     ├── fps_test.py               # meet werkelijke framerate/verwerkingstijd
-    ├── debug_view.py             # live tracking-visualisatie + opname
+    ├── debug_view.py             # live visualisatie, tuning, opname
     ├── shared.py                 # gedeelde state (detectie <-> telefoon)
     ├── webserver.py              # mobiele trainingsinterface (Flask)
-    └── main.py                   # stap 3: draaien
+    └── main.py                   # stap 4: trainingsmodus
 ```
+
+## Hoe de detectie werkt (v3, trajectvolging)
+
+De camera kijkt schuin tegen de vliegbaan aan. Een bal die in beeld
+verschijnt is dus nog onderweg; pas op het moment van contact ligt hij op
+het muurvlak en klopt de vertaling naar beamercoordinaten exact.
+
+Daarom volgt de detector de bal frame voor frame en zoekt het fysieke
+impactmoment:
+- **Knik** (primair): bij impact verandert de bewegingsrichting abrupt
+  (terugstuit of omslaan naar vallen), terwijl de aanvliegbaan vloeiend
+  kromt. Het knikpunt is de impact.
+- **Instorting** (vangnet): bij een dode klap zakt de snelheid langs de
+  aanvliegas abrupt en blijvend in.
+
+Filters tegen valse detecties: minimale aanvliegsnelheid (handen en
+schaduwen zijn te traag), vormcontrole (rond, niet langwerpig), ROI
+(alleen het gebied rond de zone telt), en onderdrukking telkens als de
+projectie zelf verandert (zodat de software zijn eigen stippen nooit als
+bal ziet). Een bal die de plaat mist en op volle snelheid het beeld uit
+vliegt, geeft geen impact.
 
 ## Doelwit-training via je telefoon
 
-Naast de detectie draait een webserver. Open op een telefoon in hetzelfde
-netwerk: `http://<ip-van-de-pi>:8080` (het juiste adres staat in de
-terminal als je `main.py` start).
+`main.py` start automatisch een webserver. Open op een telefoon in
+hetzelfde netwerk het adres dat in de terminal staat
+(`http://<ip-van-de-pi>:8080`).
 
-- Tik in de zone op je telefoon: de beamer projecteert daar een bullseye.
+- Tik in de zone: de beamer projecteert daar een bullseye.
 - Gooi: binnen `TARGET_RADIUS` van het doel = **RAAK** (groen), anders
   **MIS** met de afstand ernaast in procenten van de zonebreedte.
-- Knoppen: *Random spot* (willekeurig doelwit), *Doel weg*, *Reset score*.
+- Knoppen: *Random spot*, *Doel weg*, *Reset score*.
 - Zonder doelwit werkt alles als gewone strike/ball-teller.
-
-Extra vereiste: `sudo apt install -y python3-flask`
-
-## Hoe het werkt
-
-1. **Lenskalibratie** (`calibrate_lens.py`) corrigeert de fisheye-vervorming.
-2. **Homografie-kalibratie** (`calibrate_homography.py`) projecteert een
-   schaakbord en koppelt camera-pixels aan beamer-pixels.
-3. **Impact-detectie** (`detector.py`) gebruikt frame-differencing: het zoekt
-   naar een plotselinge verandering op de plaat = de inslag.
-4. **Hoofdapp** (`main.py`) brengt alles samen.
-
-De detectie zoekt bewust niet "de bal" maar de *verandering op de plaat*. Dat
-is veel robuuster met een trage fisheyecamera dan kleur-tracking.
-
-## Installatie (op de Pi 5, Raspberry Pi OS Bookworm)
-
-```bash
-sudo apt update
-sudo apt install -y python3-opencv python3-picamera2 python3-numpy
-```
-
-Picamera2 zit standaard in Bookworm. Test of de camera werkt:
-
-```bash
-libcamera-hello --timeout 2000
-```
-
-## Gebruik
-
-Doorloop de stappen in volgorde. Beamer en plaat moeten vast staan; verschuif
-je de opstelling, dan moet je opnieuw kalibreren.
-
-### Stap 1 - Lens kalibreren (eenmalig per camera)
-
-Print een 9x6 schaakbord op papier, plak op karton.
-
-```bash
-cd src
-python3 calibrate_lens.py
-```
-
-Houd het bord onder verschillende hoeken voor de camera, druk SPATIE per goed
-frame (15+), dan `c` om op te slaan. Maakt `lens_calib.npz`.
-
-### Stap 2 - Beamer en camera koppelen
-
-Beamer aan, projecteert op de plaat. Camera ziet de hele projectie.
-
-```bash
-python3 calibrate_homography.py
-```
-
-Wacht tot "Patroon gevonden", druk `c`. Maakt `homography.npz`.
-
-### Stap 3 - Draaien
-
-```bash
-python3 main.py
-```
-
-Toetsen: `r` achtergrond resetten, `c` treffers wissen, `q` stoppen.
+- De laatste inslag krijgt op de projectie een grote ring met kruisdraad.
 
 ## Debugviewer
-
-Wil je zien hoe de bal gevolgd wordt en waar de impact wordt gelegd:
 
 ```bash
 python3 debug_view.py
 ```
+Beamer: alleen zone + blijvende impactstippen (detectie blijft ongestoord).
+Tracking-venster: camerabeeld 960x720 met actieve baan (geel), vorige baan
+(oranje), blobs (cyaan), zone in cameracoordinaten (groen), ROI (blauw),
+impactkruizen (rood) en een HUD.
 
-De beamer toont alleen de zone en blijvende impactstippen (zo blijft de
-detectie ongestoord). In het Tracking-venster zie je het camerabeeld
-(960x720) met de actieve baan (geel), de vorige baan (oranje), blobs
-(cyaan), de zone in cameracoordinaten (groen) en impactkruizen (rood).
+Toetsen: `1/2` detectiedrempel, `3/4` minimum aanvliegsnelheid (live),
+`o` opname naar .avi, `v` Tracking-venster aan/uit, `i` impacts wissen,
+`r` achtergrond reset, `q` stop.
 
-Toetsen: `1/2` detectiedrempel, `3/4` minimum aanvliegsnelheid (live,
-zonder herstart), `o` opname naar .avi, `v` Tracking-venster aan/uit,
-`i` impacts wissen, `r` achtergrond reset, `q` stop.
+## Installatie (Pi 5, Raspberry Pi OS Bookworm of nieuwer)
 
-Tip bij een gespiegeld scherm (remote desktop = beamer): verberg het
-Tracking-venster met `v` tijdens worpen, of neem op met `o` en kijk de
-worp daarna terug.
+```bash
+sudo apt update
+sudo apt install -y python3-opencv python3-picamera2 python3-numpy python3-flask
+```
+
+Cameratest: `rpicam-hello --timeout 2000`
 
 ## Afstellen (config.py)
 
 | Probleem | Aanpassing |
 |---|---|
-| Detecteert te veel/ruis | `DIFF_THRESHOLD` omhoog |
-| Mist zachte treffers | `DIFF_THRESHOLD` omlaag |
-| Pakt schaduw/hand op als treffer | `MAX_BLOB_AREA` omlaag |
-| Telt 1 inslag dubbel | `IMPACT_COOLDOWN_FRAMES` omhoog |
-| Impact te vroeg/verkeerde plek | detectie werkt op het omkeerpunt van de baan; check framerate met `fps_test.py` |
 | Mist zachte worpen | `MIN_INCOMING_SPEED` omlaag |
 | Triggert op snelle handbeweging | `MIN_INCOMING_SPEED` omhoog |
-| Slagzone verkeerde plek/grootte | `ZONE_X/Y/W/H` |
-| Beamer andere resolutie | `PROJECTOR_WIDTH/HEIGHT` |
+| Detecteert ruis / projectie | `DIFF_THRESHOLD` omhoog |
+| Mist de bal als blob | `DIFF_THRESHOLD` omlaag, of belichting checken |
+| Beeld te donker (6 ms sluiter) | `CAM_GAIN` omhoog of licht op de plaat |
+| Impactpunt net verkeerd | `KINK_ANGLE_DEG` (45) iets omlaag = gevoeliger |
+| Telt 1 inslag dubbel | `IMPACT_COOLDOWN_FRAMES` omhoog |
+| Doelcirkel te streng/ruim | `TARGET_RADIUS` |
+| Zone verkeerde plek/maat | `ZONE_X/Y/W/H` (verhouding 3:4 houden) |
+| Beamer andere resolutie | `PROJECTOR_WIDTH/HEIGHT` + herkalibreren |
 
-## Framerate en scherpte (belangrijk voor accuratesse)
+Live afstellen zonder herstart kan in `debug_view.py` met de toetsen 1 t/m 4.
 
-De OV5647 haalt op 640x480 zo'n 58 fps, tegen ~30 fps op 1280x720. De
-standaardconfig staat daarom nu op 640x480 @ 58 fps. Minstens zo belangrijk
-is de **sluitertijd**: `CAM_EXPOSURE_US = 6000` legt elke bal in 6 ms vast,
-zodat hij een scherpe ronde blob is in plaats van een lange veeg die het
-rondheidsfilter afkeurt. Korte sluitertijd vraagt wel licht: is het beeld
-te donker, verhoog dan `CAM_GAIN` (meer ruis) of zorg voor extra verlichting
-op de plaat.
+## Herkalibreren: wanneer?
 
-Meet wat je opstelling werkelijk haalt met:
-
-```bash
-python3 fps_test.py
-```
-
-**Na elke wijziging van CAM_WIDTH/CAM_HEIGHT moet je `calibrate_lens.py`
-en `calibrate_homography.py` opnieuw draaien**, omdat beide kalibraties in
-camerapixels werken. De software waarschuwt en schakelt de lenscorrectie
-uit als de resoluties niet overeenkomen.
+| Wat is er veranderd | Lens | Homografie |
+|---|---|---|
+| Beamer/camera/plaat verplaatst | nee | JA |
+| Cameraresolutie gewijzigd | JA | JA |
+| Schermconfiguratie/resolutie beamer | nee | JA |
+| Zone-afmetingen in config | nee | nee |
+| Detectieparameters | nee | nee |
 
 ## Bekende beperkingen
 
-- De OV5647 haalt ~30 fps. Bij echt snelle pitches mis je de bal of zie je
-  alleen een veeg. Voor "matige" worpen is dit prima. Wil je later opschalen,
-  dan is de Pi Global Shutter Camera de juiste hardware.
-- Frame-differencing reageert ook op bewegende handen/schaduwen in beeld.
-  Houd het beeldveld zo schoon mogelijk en gebruik `MAX_BLOB_AREA`.
-- Beamer en camera moeten vanuit ongeveer dezelfde kant kijken; staat de
-  camera te schuin t.o.v. de plaat, dan wordt de homografie minder nauwkeurig.
+- De OV5647 haalt ~58 fps op 640x480. Voor matige worpsnelheden ruim
+  voldoende; voor echte pitches (100+ km/u) is de Pi Global Shutter Camera
+  de juiste upgrade.
+- De beamer staat 17 graden gekanteld: zonder keystone-correctie wordt de
+  zone een trapezium. Keystone op de beamer zelf aanzetten en de fysieke
+  breedte nameten (~43 cm).
+- Camera en beamer moeten grofweg vanuit dezelfde kant naar de plaat
+  kijken voor een nauwkeurige homografie.
