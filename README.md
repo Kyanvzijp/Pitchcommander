@@ -108,6 +108,9 @@ Toetsen: `r` achtergrond resetten, `c` treffers wissen, `q` stoppen.
 | Mist zachte treffers | `DIFF_THRESHOLD` omlaag |
 | Pakt schaduw/hand op als treffer | `MAX_BLOB_AREA` omlaag |
 | Telt 1 inslag dubbel | `IMPACT_COOLDOWN_FRAMES` omhoog |
+| Impact te vroeg/verkeerde plek | detectie werkt op het omkeerpunt van de baan; check framerate met `fps_test.py` |
+| Mist zachte worpen | `MIN_INCOMING_SPEED` omlaag |
+| Triggert op snelle handbeweging | `MIN_INCOMING_SPEED` omhoog |
 | Slagzone verkeerde plek/grootte | `ZONE_X/Y/W/H` |
 | Beamer andere resolutie | `PROJECTOR_WIDTH/HEIGHT` |
 

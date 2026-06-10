@@ -78,7 +78,7 @@ def render(hits, strikes, balls, target, hit_count, miss_count):
                       np.uint8)
     draw_zone(canvas)
     draw_target(canvas, target)
-    for (bx, by, strike, was_hit, _) in hits[-20:]:
+    for idx, (bx, by, strike, was_hit, _) in enumerate(hits[-20:]):
         if was_hit is True:
             color = (0, 220, 0)        # raak: groen
         elif was_hit is False:
@@ -87,6 +87,20 @@ def render(hits, strikes, balls, target, hit_count, miss_count):
             color = (0, 0, 255) if strike else (0, 180, 255)
         cv2.circle(canvas, (int(bx), int(by)), 14, color, -1)
         cv2.circle(canvas, (int(bx), int(by)), 14, (255, 255, 255), 2)
+    # De LAATSTE inslag extra markeren: grote ring + kruisdraad, zodat de
+    # pitcher vanaf de werpplek direct ziet waar de impact zat.
+    if hits:
+        bx, by, strike, was_hit, _ = hits[-1]
+        bx, by = int(bx), int(by)
+        c = ((0, 220, 0) if was_hit is True else
+             (0, 200, 255) if was_hit is False else
+             (0, 0, 255) if strike else (0, 180, 255))
+        cv2.circle(canvas, (bx, by), 34, (255, 255, 255), 3)
+        cv2.circle(canvas, (bx, by), 34, c, 1)
+        cv2.line(canvas, (bx - 52, by), (bx - 22, by), (255, 255, 255), 2)
+        cv2.line(canvas, (bx + 22, by), (bx + 52, by), (255, 255, 255), 2)
+        cv2.line(canvas, (bx, by - 52), (bx, by - 22), (255, 255, 255), 2)
+        cv2.line(canvas, (bx, by + 22), (bx, by + 52), (255, 255, 255), 2)
     label = (f"RAAK: {hit_count}   MIS: {miss_count}" if target is not None
              or hit_count or miss_count
              else f"STRIKES: {strikes}   BALLS: {balls}")

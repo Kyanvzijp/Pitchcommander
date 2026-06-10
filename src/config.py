@@ -57,9 +57,7 @@ CHESSBOARD_ROWS = 6
 # ----- Impact-detectie -----
 # Drempel t.o.v. het achtergrondmodel (0-255). Hoger = minder gevoelig.
 DIFF_THRESHOLD = 35
-# Drempel t.o.v. het VORIGE frame. Een echte inslag verschijnt plotseling,
-# dus moet ook in de frame-naar-frame diff zichtbaar zijn.
-FRAME_DIFF_THRESHOLD = 30
+# (FRAME_DIFF_THRESHOLD vervallen: detectie werkt nu op trajectvolging.)
 # Minimale/maximale oppervlakte van een impact-blob (in camera-pixels).
 # Geschaald voor 640x480; gebruik je een hogere resolutie, schaal mee
 # (oppervlakte schaalt kwadratisch met de resolutie).
@@ -70,15 +68,29 @@ MAX_BLOB_AREA = 2200
 MIN_CIRCULARITY = 0.45
 # Maximale verhouding breedte/hoogte van de blob (armen zijn langwerpig).
 MAX_ASPECT_RATIO = 2.2
-# Transient-check: een echte inslag is kort. Een kandidaat-blob die langer
-# dan dit aantal frames op (ongeveer) dezelfde plek blijft, is een hand,
-# schaduw of object en wordt verworpen.
-# Bij ~58 fps duurt een frame ~17 ms; een bal is wat meer frames zichtbaar
-# dan bij 30 fps, dus deze staat iets ruimer.
-TRANSIENT_MAX_FRAMES = 6
-# Afstand (px) waarbinnen een blob in het volgende frame als "dezelfde
-# kandidaat" geldt. Geschaald voor 640x480.
-CANDIDATE_MATCH_DIST = 35
+# ----- Trajectvolging (impact = omkeerpunt van de baan) -----
+# De bal wordt frame voor frame gevolgd. De impact is het punt waar de
+# baan omkeert (terugstuit) of abrupt stilvalt (dode klap). Pas op dat
+# moment is de bal OP het muurvlak en klopt de homografie-mapping exact.
+#
+# Minimale aanvliegsnelheid in px/frame. Een echte worp haalt op 640x480
+# bij 58 fps al snel 40-100 px/frame; handen en schaduwen blijven daar
+# ruim onder. Dit is het belangrijkste filter tegen valse detecties.
+MIN_INCOMING_SPEED = 18
+# Minimale afgelegde weg (px) in beeld voordat iets als worp kan tellen.
+MIN_APPROACH_PX = 40
+# Een impact geeft een abrupte richtingsverandering (knik) in de baan:
+# terugstuiten of omslaan naar vallen. De aanvliegbaan zelf kromt vloeiend
+# (enkele graden per frame), dus een knik groter dan deze hoek markeert
+# het impactmoment.
+KINK_ANGLE_DEG = 45
+# Of: de snelheid direct na het verste punt zakt onder deze fractie van
+# de aanvliegsnelheid (dode klap die omlaag valt).
+STOP_SPEED_FACTOR = 0.5
+# Bal mag dit aantal frames kwijt zijn voordat de baan wordt afgesloten.
+TRACK_MISSING_MAX = 2
+# Veiligheidslimiet op baanlengte (frames).
+TRACK_MAX_LEN = 40
 # Aantal frames dat een blob "rust" moet hebben voordat we een nieuwe
 # impact accepteren (debounce, voorkomt dubbele detectie).
 IMPACT_COOLDOWN_FRAMES = 25

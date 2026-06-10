@@ -1,27 +1,27 @@
 """
-Impact-detectie v2, gebouwd tegen valse positieven.
+Impact-detectie v3: trajectvolging met omkeerpunt-analyse.
 
-Een blob telt pas als inslag wanneer hij ALLE checks doorstaat:
+WAAROM: de camera kijkt schuin tegen de vliegbaan aan. Een bal die in beeld
+verschijnt is nog onderweg; zijn beeldpositie wijst dan NIET naar de plek op
+de muur (parallax). Pas op het moment van contact ligt de bal op het
+muurvlak en klopt de homografie-mapping exact.
 
-1. ROI-masker      : alleen het gebied van de slagzone (plus marge) telt.
-                     Alles daarbuiten in het camerabeeld wordt genegeerd.
-2. Dubbele diff    : de verandering moet zichtbaar zijn t.o.v. het
-                     achtergrondmodel EN t.o.v. het vorige frame. Een echte
-                     inslag verschijnt plotseling; langzame veranderingen
-                     (licht, schaduw die opschuift) vallen af.
-3. Vormfilter      : de blob moet rond genoeg zijn (circularity) en niet
-                     langwerpig (aspect ratio). Armen en schaduwen vallen af.
-4. Transient-check : een inslag is kort. Een kandidaat die langer dan
-                     TRANSIENT_MAX_FRAMES op dezelfde plek blijft, is een
-                     hand of object en wordt verworpen. De impact wordt pas
-                     bevestigd zodra de kandidaat weer VERDWENEN is.
-5. Onderdrukking   : nadat de projectie zelf verandert (nieuwe stip), wordt
-                     detectie kort onderdrukt en leert de achtergrond snel
-                     bij, zodat de software zijn eigen projectie niet ziet
-                     als inslag.
+HOE: de bal wordt frame voor frame gevolgd als bewegende blob. De impact is
+het punt waar de baan fysiek omkeert:
+  - knik       : de bewegingsrichting verandert abrupt (> KINK_ANGLE_DEG),
+                 want de bal stuit terug of slaat om naar vallen, terwijl
+                 de aanvliegbaan zelf vloeiend kromt. Het knikpunt is de
+                 impact. Dit is het primaire criterium.
+  - instorting : vangnet voor een dode klap zonder meetbare nabeweging:
+                 de snelheid langs de aanvliegas zakt blijvend onder
+                 STOP_SPEED_FACTOR x de aanvliegsnelheid; de impact is dan
+                 het verste punt binnen dat venster.
 
-Let op: de transient-check voegt 2 a 4 frames vertraging toe (~100 ms op
-30 fps). Dat is onzichtbaar voor de gebruiker maar filtert vrijwel alle ruis.
+Een baan die zonder omkeren met volle snelheid het beeld verlaat (bal die
+de plaat volledig mist) levert GEEN impact op. Langzame objecten (handen,
+schaduwen) halen MIN_INCOMING_SPEED niet en tellen nooit mee. Vormfilters
+(rondheid, aspect ratio) en het ROI-masker blijven van kracht, net als de
+onderdrukking na projectie-wijzigingen.
 """
 import math
 import cv2
@@ -29,35 +29,23 @@ import numpy as np
 import config
 
 
-class _Candidate:
-    __slots__ = ("x", "y", "first_x", "first_y", "age", "seen_this_frame")
-
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.first_x = x   # impactpunt = plek van eerste verschijning
-        self.first_y = y
-        self.age = 1
-        self.seen_this_frame = True
-
-
 class ImpactDetector:
     def __init__(self, roi_mask=None):
         """roi_mask: uint8 masker in cameraresolutie (255 = meetellen),
         of None om het hele beeld te gebruiken."""
         self.bg = None
-        self.prev_gray = None
         self.cooldown = 0
         self.suppress = 0
         self.roi_mask = roi_mask
-        self.candidates = []
+        self._track = None       # lijst van (x, y) posities
+        self._missing = 0
 
     # ----- publiek -----
 
     def reset_background(self):
         self.bg = None
-        self.prev_gray = None
-        self.candidates.clear()
+        self._track = None
+        self._missing = 0
 
     def suppress_frames(self, n=None):
         """Roep dit aan direct nadat de projectie verandert."""
@@ -76,27 +64,24 @@ class ImpactDetector:
 
         if self.bg is None:
             self.bg = gray.astype(np.float32)
-            self.prev_gray = gray
             return None
 
-        new_blobs, present_mask = self._find_blobs(gray)
-        impact = self._update_candidates(new_blobs, present_mask)
+        blobs, fg_mask = self._find_ball_blobs(gray)
+        impact = self._update_track(blobs)
 
-        # Achtergrond bijwerken, maar NIET op plekken waar nu iets voor de
-        # plaat staat (anders 'leert' de achtergrond een hand of object aan
-        # en geeft het weggaan daarvan een valse trigger). Na een projectie-
-        # verandering juist overal snel bijleren.
+        # Achtergrond bijwerken: snel na een projectie-verandering, anders
+        # langzaam en niet over voorgrond-objecten heen.
         if self.suppress > 0:
             cv2.accumulateWeighted(gray, self.bg,
                                    config.BG_FAST_LEARNING_RATE)
         else:
-            learn_mask = cv2.bitwise_not(present_mask)
+            learn_mask = cv2.bitwise_not(fg_mask)
             cv2.accumulateWeighted(gray, self.bg,
                                    config.BG_LEARNING_RATE, mask=learn_mask)
-        self.prev_gray = gray
 
         if self.suppress > 0:
             self.suppress -= 1
+            self._track = None
             return None
         if self.cooldown > 0:
             self.cooldown -= 1
@@ -105,105 +90,146 @@ class ImpactDetector:
             self.cooldown = config.IMPACT_COOLDOWN_FRAMES
         return impact
 
-    # ----- intern -----
+    # ----- intern: blob-detectie -----
 
-    def _find_blobs(self, gray):
-        """Geeft (new_blobs, present_mask) terug.
-
-        new_blobs    : zwaartepunten van blobs die plotseling EN nieuw zijn
-                       (bg-diff EN frame-diff), na vormfilters. Hieruit
-                       ontstaan nieuwe kandidaten.
-        present_mask : uint8 masker van alles dat NU afwijkt van de
-                       achtergrond (alleen bg-diff). Hiermee volgen we
-                       bestaande kandidaten: een hand die stilligt beweegt
-                       niet meer (geen frame-diff) maar is er nog wel."""
-        diff_bg = cv2.absdiff(gray, self.bg.astype(np.uint8))
-        diff_fr = cv2.absdiff(gray, self.prev_gray)
-
-        _, m_bg = cv2.threshold(diff_bg, config.DIFF_THRESHOLD, 255,
-                                cv2.THRESH_BINARY)
-        _, m_fr = cv2.threshold(diff_fr, config.FRAME_DIFF_THRESHOLD, 255,
+    def _find_ball_blobs(self, gray):
+        """Bal-achtige blobs (rond, juiste grootte) in de ROI.
+        Geeft (lijst van zwaartepunten, voorgrondmasker) terug."""
+        diff = cv2.absdiff(gray, self.bg.astype(np.uint8))
+        _, mask = cv2.threshold(diff, config.DIFF_THRESHOLD, 255,
                                 cv2.THRESH_BINARY)
         if self.roi_mask is not None:
-            m_bg = cv2.bitwise_and(m_bg, self.roi_mask)
-
-        m_bg = cv2.morphologyEx(m_bg, cv2.MORPH_OPEN,
+            mask = cv2.bitwise_and(mask, self.roi_mask)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,
                                 np.ones((3, 3), np.uint8))
-        m_bg = cv2.dilate(m_bg, None, iterations=2)
+        mask = cv2.dilate(mask, None, iterations=2)
 
-        # Plotseling (frame-diff) en afwijkend van achtergrond: beide nodig
-        # om een NIEUWE kandidaat te starten.
-        mask_new = cv2.bitwise_and(m_bg, m_fr)
-
-        new_blobs = []
-        contours, _ = cv2.findContours(mask_new, cv2.RETR_EXTERNAL,
+        blobs = []
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
                                        cv2.CHAIN_APPROX_SIMPLE)
         for c in contours:
             area = cv2.contourArea(c)
             if not (config.MIN_BLOB_AREA <= area <= config.MAX_BLOB_AREA):
                 continue
-            # Rondheid.
             per = cv2.arcLength(c, True)
             if per <= 0:
                 continue
-            circularity = 4.0 * math.pi * area / (per * per)
-            if circularity < config.MIN_CIRCULARITY:
+            if 4.0 * math.pi * area / (per * per) < config.MIN_CIRCULARITY:
                 continue
-            # Aspect ratio.
             x, y, w, h = cv2.boundingRect(c)
-            ratio = max(w, h) / max(1, min(w, h))
-            if ratio > config.MAX_ASPECT_RATIO:
+            if max(w, h) / max(1, min(w, h)) > config.MAX_ASPECT_RATIO:
                 continue
             M = cv2.moments(c)
             if M["m00"] > 0:
-                new_blobs.append((M["m10"] / M["m00"], M["m01"] / M["m00"]))
-        return new_blobs, m_bg
+                blobs.append((M["m10"] / M["m00"], M["m01"] / M["m00"]))
+        return blobs, mask
 
-    def _update_candidates(self, new_blobs, present_mask):
-        """Bestaande kandidaten blijven leven zolang het aanwezigheids-
-        masker op hun plek nog 'aan' staat (ook als ze stilliggen). Nieuwe
-        kandidaten ontstaan alleen uit new_blobs. Een impact wordt bevestigd
-        zodra een KORTLEVENDE kandidaat weer verdwenen is."""
-        h, w = present_mask.shape
+    # ----- intern: trajectvolging -----
 
-        # 1. Bestaande kandidaten: nog aanwezig volgens het bg-masker?
-        for cand in self.candidates:
-            x = min(max(int(cand.x), 0), w - 1)
-            y = min(max(int(cand.y), 0), h - 1)
-            r = 8
-            patch = present_mask[max(0, y - r):y + r, max(0, x - r):x + r]
-            cand.seen_this_frame = bool(patch.any())
-            if cand.seen_this_frame:
-                cand.age += 1
+    def _update_track(self, blobs):
+        if self._track is None:
+            if blobs:
+                # Start een nieuwe baan op de grootste kans: eerste blob.
+                self._track = [blobs[0]]
+                self._missing = 0
+            return None
 
-        # 2. Nieuwe blobs die niet bij een bestaande kandidaat horen,
-        #    worden nieuwe kandidaten.
-        max_d2 = config.CANDIDATE_MATCH_DIST ** 2
-        for (bx, by) in new_blobs:
-            matched = False
-            for cand in self.candidates:
-                d2 = (cand.x - bx) ** 2 + (cand.y - by) ** 2
-                if d2 < max_d2:
-                    cand.x, cand.y = bx, by
-                    cand.seen_this_frame = True
-                    matched = True
-                    break
-            if not matched:
-                self.candidates.append(_Candidate(bx, by))
+        # Voorspel de volgende positie en zoek de dichtstbijzijnde blob
+        # binnen een snelheidsafhankelijk venster.
+        px, py = self._track[-1]
+        if len(self._track) >= 2:
+            vx = px - self._track[-2][0]
+            vy = py - self._track[-2][1]
+        else:
+            vx = vy = 0.0
+        pred = (px + vx, py + vy)
+        speed = math.hypot(vx, vy)
+        gate = max(80.0, 2.5 * speed)
 
-        # 3. Verdwenen kandidaten beoordelen.
-        impact = None
-        survivors = []
-        for cand in self.candidates:
-            if cand.seen_this_frame:
-                survivors.append(cand)
-            else:
-                # Kandidaat is weg. Kort geleefd = echte inslag (transient).
-                # Lang geleefd = hand/object dat vertrok: negeren.
-                if 1 <= cand.age <= config.TRANSIENT_MAX_FRAMES \
-                        and impact is None:
-                    impact = (cand.first_x, cand.first_y)
-        self.candidates = survivors
+        best = None
+        best_d = gate
+        for (bx, by) in blobs:
+            d = math.hypot(bx - pred[0], by - pred[1])
+            if d < best_d:
+                best_d = d
+                best = (bx, by)
+
+        if best is not None:
+            self._track.append(best)
+            self._missing = 0
+            if len(self._track) > config.TRACK_MAX_LEN:
+                return self._finalize()
+            # Online-check: is de terugstuit al zichtbaar? Dan hoeven we
+            # niet te wachten tot de bal uit beeld is.
+            return self._check_reversal_online()
+        else:
+            self._missing += 1
+            if self._missing > config.TRACK_MISSING_MAX:
+                return self._finalize()
+            return None
+
+    def _analyze(self, pts):
+        """Geeft het impactpunt of None.
+
+        Primair: zoek een KNIK in de baan, een abrupte richtingsverandering
+        tussen twee opeenvolgende verplaatsingen. De aanvliegbaan kromt
+        vloeiend; de impact (terugstuit of omslaan naar vallen) geeft een
+        scherpe hoek. Het knikpunt is het impactpunt.
+
+        Vangnet: dode klap zonder meetbare nabeweging. De snelheid langs de
+        aanvliegas stort blijvend in; impact is het verste punt binnen dat
+        instortingsvenster."""
+        if len(pts) < 3:
+            return None
+        p = np.asarray(pts, dtype=np.float64)
+        disp = np.diff(p, axis=0)
+
+        n_in = min(3, len(disp))
+        v_in = disp[:n_in].mean(axis=0)
+        speed_in = float(np.hypot(*v_in))
+        if speed_in < config.MIN_INCOMING_SPEED:
+            return None
+        u = v_in / speed_in
+        s = (p - p[0]) @ u
+
+        # --- Primair: knik in de baan ---
+        cos_kink = math.cos(math.radians(config.KINK_ANGLE_DEG))
+        norms = np.hypot(disp[:, 0], disp[:, 1])
+        for i in range(len(disp) - 1):
+            na, nb = norms[i], norms[i + 1]
+            if na < 3.0 or nb < 3.0:
+                continue  # jitter, geen echte beweging
+            cosang = float(disp[i] @ disp[i + 1]) / (na * nb)
+            if cosang < cos_kink and s[i + 1] >= config.MIN_APPROACH_PX:
+                return (float(p[i + 1][0]), float(p[i + 1][1]))
+
+        # --- Vangnet: blijvende snelheidsinstorting langs de aanvliegas ---
+        ds = np.diff(s)
+        thr = config.STOP_SPEED_FACTOR * speed_in
+        slow = np.where(ds < thr)[0]
+        if len(slow) == 0:
+            return None
+        j = int(slow[0])
+        rest = ds[j:j + 3]
+        if len(ds) - j < 2 or rest.mean() >= thr:
+            return None  # even afgeremd maar niet gestopt: geen impact
+        win_end = min(j + 4, len(s))
+        k = j + int(np.argmax(s[j:win_end]))
+        if s[k] < config.MIN_APPROACH_PX:
+            return None
+        return (float(p[k][0]), float(p[k][1]))
+
+    def _check_reversal_online(self):
+        impact = self._analyze(self._track)
+        if impact is not None:
+            self._track = None
+            self._missing = 0
+        return impact
+
+    def _finalize(self):
+        impact = self._analyze(self._track)
+        self._track = None
+        self._missing = 0
         return impact
 
 
