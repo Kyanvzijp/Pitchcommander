@@ -5,3 +5,5 @@
 # picamera2 is NIET via pip beschikbaar; gebruik daarvoor apt op de Pi.
 numpy>=1.24
 opencv-python>=4.8
+# Flask voor de mobiele trainingsinterface (op de Pi: sudo apt install python3-flask)
+flask>=3.0

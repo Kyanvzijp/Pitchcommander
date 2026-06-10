@@ -20,8 +20,24 @@ slagzone/
     ├── detector.py               # impact-detectie (frame-differencing)
     ├── calibrate_lens.py         # stap 1: lens kalibreren
     ├── calibrate_homography.py   # stap 2: beamer <-> camera koppelen
+    ├── shared.py                 # gedeelde state (detectie <-> telefoon)
+    ├── webserver.py              # mobiele trainingsinterface (Flask)
     └── main.py                   # stap 3: draaien
 ```
+
+## Doelwit-training via je telefoon
+
+Naast de detectie draait een webserver. Open op een telefoon in hetzelfde
+netwerk: `http://<ip-van-de-pi>:8080` (het juiste adres staat in de
+terminal als je `main.py` start).
+
+- Tik in de zone op je telefoon: de beamer projecteert daar een bullseye.
+- Gooi: binnen `TARGET_RADIUS` van het doel = **RAAK** (groen), anders
+  **MIS** met de afstand ernaast in procenten van de zonebreedte.
+- Knoppen: *Random spot* (willekeurig doelwit), *Doel weg*, *Reset score*.
+- Zonder doelwit werkt alles als gewone strike/ball-teller.
+
+Extra vereiste: `sudo apt install -y python3-flask`
 
 ## Hoe het werkt
 
