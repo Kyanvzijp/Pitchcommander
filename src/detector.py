@@ -39,6 +39,10 @@ class ImpactDetector:
         self.roi_mask = roi_mask
         self._track = None       # lijst van (x, y) posities
         self._missing = 0
+        # Voor visualisatie (debug_view.py): laatst gedetecteerde blobs en
+        # de laatst afgesloten baan. Puur lezen, geen invloed op de logica.
+        self.last_blobs = []
+        self.last_track = []
 
     # ----- publiek -----
 
@@ -67,6 +71,7 @@ class ImpactDetector:
             return None
 
         blobs, fg_mask = self._find_ball_blobs(gray)
+        self.last_blobs = blobs
         impact = self._update_track(blobs)
 
         # Achtergrond bijwerken: snel na een projectie-verandering, anders
@@ -222,15 +227,23 @@ class ImpactDetector:
     def _check_reversal_online(self):
         impact = self._analyze(self._track)
         if impact is not None:
+            self.last_track = list(self._track)
             self._track = None
             self._missing = 0
         return impact
 
     def _finalize(self):
         impact = self._analyze(self._track)
+        if self._track:
+            self.last_track = list(self._track)
         self._track = None
         self._missing = 0
         return impact
+
+    @property
+    def track(self):
+        """Kopie van de actieve baan, voor visualisatie."""
+        return list(self._track) if self._track else []
 
 
 def build_roi_mask(H, cam_w, cam_h):

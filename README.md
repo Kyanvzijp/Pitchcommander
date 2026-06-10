@@ -21,6 +21,7 @@ slagzone/
     ├── calibrate_lens.py         # stap 1: lens kalibreren
     ├── calibrate_homography.py   # stap 2: beamer <-> camera koppelen
     ├── fps_test.py               # meet werkelijke framerate/verwerkingstijd
+    ├── debug_view.py             # live tracking-visualisatie + opname
     ├── shared.py                 # gedeelde state (detectie <-> telefoon)
     ├── webserver.py              # mobiele trainingsinterface (Flask)
     └── main.py                   # stap 3: draaien
@@ -99,6 +100,27 @@ python3 main.py
 ```
 
 Toetsen: `r` achtergrond resetten, `c` treffers wissen, `q` stoppen.
+
+## Debugviewer
+
+Wil je zien hoe de bal gevolgd wordt en waar de impact wordt gelegd:
+
+```bash
+python3 debug_view.py
+```
+
+De beamer toont alleen de zone en blijvende impactstippen (zo blijft de
+detectie ongestoord). In het Tracking-venster zie je het camerabeeld
+(960x720) met de actieve baan (geel), de vorige baan (oranje), blobs
+(cyaan), de zone in cameracoordinaten (groen) en impactkruizen (rood).
+
+Toetsen: `1/2` detectiedrempel, `3/4` minimum aanvliegsnelheid (live,
+zonder herstart), `o` opname naar .avi, `v` Tracking-venster aan/uit,
+`i` impacts wissen, `r` achtergrond reset, `q` stop.
+
+Tip bij een gespiegeld scherm (remote desktop = beamer): verberg het
+Tracking-venster met `v` tijdens worpen, of neem op met `o` en kijk de
+worp daarna terug.
 
 ## Afstellen (config.py)
 
