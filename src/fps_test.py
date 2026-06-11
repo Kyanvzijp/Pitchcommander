@@ -1,8 +1,9 @@
 """
-Meet de werkelijk gehaalde framerate en verwerkingstijd op de Pi.
+Meet de werkelijk gehaalde framerate, verwerkingstijd EN beeldhelderheid.
 
-Draai dit na elke wijziging aan CAM_WIDTH/HEIGHT/FPS/EXPOSURE om te zien
-wat je opstelling echt haalt. Geen vensters nodig, werkt ook via SSH.
+Draai dit na elke wijziging aan CAM_WIDTH/HEIGHT/FPS/EXPOSURE of aan de
+belichting (IR-lampjes, kamerlicht) om te zien wat je opstelling echt
+haalt. Geen vensters nodig, werkt ook via SSH.
 
   python3 fps_test.py
 """
@@ -38,8 +39,10 @@ def main():
             n += 1
     fps_capture = n / DUUR
 
-    # 2. Volledige pijplijn (capture + lenscorrectie + detectie).
+    # 2. Volledige pijplijn (capture + lenscorrectie + detectie),
+    #    en ondertussen de beeldhelderheid bemonsteren.
     proc_times = []
+    helderheden = []
     n = 0
     t0 = time.perf_counter()
     while time.perf_counter() - t0 < DUUR:
@@ -49,8 +52,10 @@ def main():
         t1 = time.perf_counter()
         det.process(lens.correct(frame))
         proc_times.append(time.perf_counter() - t1)
+        helderheden.append(float(frame.mean()))
         n += 1
     fps_pipeline = n / DUUR
+    laatste = frame
     cam.release()
 
     p = np.array(proc_times) * 1000.0
@@ -58,6 +63,32 @@ def main():
     print(f"Pijplijn:  {fps_pipeline:5.1f} fps "
           f"(verwerking {p.mean():.1f} ms gem, {p.max():.1f} ms piek)")
     print(f"Lenscorrectie actief: {'ja' if lens.enabled else 'NEE'}")
+
+    # --- Helderheidsbeoordeling ---
+    gem = float(np.mean(helderheden))
+    # Donkerste en lichtste 1% van het laatste frame: zicht op contrast
+    # en overbelichting.
+    p1, p99 = np.percentile(laatste, (1, 99))
+    print(f"\nHelderheid: gemiddeld {gem:.0f}/255 "
+          f"(donkerste 1%: {p1:.0f}, lichtste 1%: {p99:.0f})")
+    if gem < 35:
+        print("  -> TE DONKER voor betrouwbare detectie. Opties: IR-lampjes"
+              "\n     monteren/controleren (LDR-sensortjes afschermen of"
+              "\n     potmeter bijdraaien), CAM_GAIN omhoog (max ~10), of"
+              "\n     als laatste CAM_EXPOSURE_US naar 8000.")
+    elif gem < 60:
+        print("  -> Aan de donkere kant maar werkbaar. Test met"
+              "\n     debug_view.py of de bal als blob wordt opgepikt;"
+              "\n     IR-verlichting geeft hier nog duidelijke winst.")
+    elif gem <= 170:
+        print("  -> GOED. Ruim voldoende licht voor de detectie.")
+    else:
+        print("  -> Erg licht; check of de lichtste delen niet dichtslaan"
+              f"\n     (lichtste 1% = {p99:.0f}; bij 255 verdwijnt de bal"
+              "\n     in overbelichting). Zo ja: CAM_GAIN omlaag.")
+    if p99 - p1 < 30:
+        print("  -> LET OP: weinig contrast in beeld; detectie kan moeite"
+              "\n     krijgen de bal van de plaat te onderscheiden.")
 
     budget = 1000.0 / config.CAM_FPS
     if p.mean() > budget * 0.8:

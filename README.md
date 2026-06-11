@@ -21,14 +21,21 @@ doelwitten waar de pitcher op moet gooien, met automatische raak/mis-telling.
 
 **Morgen testen / openstaand:**
 1. `fps_test.py` draaien: halen we echt ~58 fps en is het beeld licht
-   genoeg met de 6 ms sluitertijd? Zo niet: `CAM_GAIN` omhoog of licht erbij.
+   genoeg met de 6 ms sluitertijd? Het script beoordeelt de helderheid nu
+   zelf (te donker / werkbaar / goed / te licht). Te donker: IR-lampjes op
+   de camera monteren en controleren (LDR-sensortjes afschermen of de
+   potmeter bijdraaien; IR is onzichtbaar en wast de projectie niet uit),
+   anders `CAM_GAIN` omhoog.
 2. Beide kalibraties opnieuw doen (de cameraresolutie is gewijzigd naar
    640x480, dus oude kalibraties zijn ongeldig; de software waarschuwt zelf).
 3. Echte worpen testen met `debug_view.py` + opname ('o'): klopt het
    impactpunt? Volgt de gele baan de bal netjes?
-4. Beamer keystone-correctie aanzetten (staat 17 graden gekanteld) en met
-   een rolmaat checken of de zone op de plaat ~43 cm breed is; anders
-   `ZONE_W`/`ZONE_H` in dezelfde verhouding bijschalen.
+4. Zone nameten: hij is op maat gezet voor ~43,2 cm breed x ~45,7 cm hoog
+   (gemeten schaal: ~13,6 px/cm horizontaal, ~14 px/cm verticaal bij de
+   beamer op 2 m). Wil je de volle slagzonehoogte (55-60 cm), zet de
+   beamer dan ~45-50 cm verder terug, herkalibreer de homografie, meet
+   opnieuw en schaal `ZONE_W`/`ZONE_H` mee. Keystone-correctie van de
+   beamer aanzetten (17 graden kanteling).
 
 **Bekende aandachtspunten:**
 - Remote desktop = beameruitgang op deze opstelling. Kalibreer en draai
@@ -115,6 +122,15 @@ impactmoment:
   kromt. Het knikpunt is de impact.
 - **Instorting** (vangnet): bij een dode klap zakt de snelheid langs de
   aanvliegas abrupt en blijvend in.
+- **Verdwijnpunt** (vangnet): eindigt de baan abrupt midden in de ROI
+  terwijl de bal met worpsnelheid vloog, dan is hij op de plaat geklapt en
+  raakte de tracker hem kwijt (stuit richting camera, bewegingsonscherpte).
+  Impact = laatste punt. Eindigt de baan aan de rand, dan was het een
+  misser: geen impact.
+
+Elke afgewezen baan wordt met reden gelogd in de terminal en getoond in de
+HUD van de debugviewer ("laatste afwijzing: ..."). Zo zie je direct WAAROM
+een worp niet telde en welke knop je moet bijstellen.
 
 Filters tegen valse detecties: minimale aanvliegsnelheid (handen en
 schaduwen zijn te traag), vormcontrole (rond, niet langwerpig), ROI

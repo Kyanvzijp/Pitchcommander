@@ -114,6 +114,10 @@ def build_tracking_frame(gray, detector, zone_pts, roi_pts,
            f"baan {len(detector.track)}  impacts {len(impacts_cam)}")
     cv2.putText(frame, hud, (10, 26), cv2.FONT_HERSHEY_SIMPLEX,
                 0.55, (255, 255, 255), 1)
+    if detector.last_reject:
+        cv2.putText(frame, f"laatste afwijzing: {detector.last_reject}",
+                    (10, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                    (0, 140, 255), 1)
     if recording:
         cv2.circle(frame, (VIEW_W - 24, 22), 9, (0, 0, 255), -1)
         cv2.putText(frame, "REC", (VIEW_W - 78, 28),
@@ -132,7 +136,7 @@ def build_beamer_canvas(impacts_beamer):
         cv2.circle(canvas, (bx, by), 12, KLEUR_IMPACT, -1)
         cv2.circle(canvas, (bx, by), 26, (255, 255, 255), 2)
     cv2.putText(canvas, f"DEBUG  impacts: {len(impacts_beamer)}",
-                (x, y + h + 36), cv2.FONT_HERSHEY_SIMPLEX,
+                (x + w + 24, y + 40), cv2.FONT_HERSHEY_SIMPLEX,
                 0.8, (255, 255, 255), 2)
     return canvas
 

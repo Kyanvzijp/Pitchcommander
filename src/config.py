@@ -9,14 +9,16 @@ PROJECTOR_WIDTH = 1280
 PROJECTOR_HEIGHT = 720
 
 # Slagzone als rechthoek, in beamer-pixels.
-# Een echte slagzone is STAAND: de thuisplaat is 43 cm breed en de zone
-# loopt verticaal van knieholte tot halverwege de romp. Verhouding hier
-# 3:4 (420x560). Meet na projectie de fysieke breedte op de plaat na en
-# schaal ZONE_W/ZONE_H tot die ~43 cm is.
-ZONE_X = 430          # linkerbovenhoek X (gecentreerd: (1280-420)/2)
-ZONE_Y = 80           # linkerbovenhoek Y (gecentreerd: (720-560)/2)
-ZONE_W = 420          # breedte
-ZONE_H = 560          # hoogte
+# Gemeten schaal van deze opstelling (beamer op 2 m): 420 px = 31 cm breed,
+# 560 px = 40 cm hoog, dus ~13,6 px/cm horizontaal en ~14 px/cm verticaal.
+# Hieronder: breedte op de officiele 43,2 cm (thuisplaat), hoogte zo groot
+# als de beamer aankan (~45,7 cm). Voor de volle slagzonehoogte (55-60 cm)
+# moet de beamer ~45-50 cm verder van de plaat staan; meet daarna opnieuw
+# en schaal deze waarden, en herkalibreer de homografie.
+ZONE_X = 347          # linkerbovenhoek X (gecentreerd: (1280-585)/2)
+ZONE_Y = 36           # linkerbovenhoek Y
+ZONE_W = 585          # breedte  (~43,2 cm bij 13,6 px/cm)
+ZONE_H = 640          # hoogte   (~45,7 cm bij 14 px/cm)
 
 # ----- Camera -----
 # OV5647 sensormodi (libcamera): 640x480 @ ~58 fps, 1296x972 @ ~43 fps,
@@ -106,7 +108,7 @@ BG_FAST_LEARNING_RATE = 0.35
 # ----- ROI -----
 # ROI: marge (in beamer-pixels) rond de slagzone die nog meetelt. Alles
 # daarbuiten in het camerabeeld wordt volledig genegeerd.
-ROI_MARGIN_PX = 120
+ROI_MARGIN_PX = 200
 
 # ----- Doelwit-training (mobiel) -----
 # Poort van de webinterface voor de telefoon.

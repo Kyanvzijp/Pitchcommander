@@ -16,6 +16,14 @@ het punt waar de baan fysiek omkeert:
                  de snelheid langs de aanvliegas zakt blijvend onder
                  STOP_SPEED_FACTOR x de aanvliegsnelheid; de impact is dan
                  het verste punt binnen dat venster.
+  - verdwijnpunt: de baan eindigt abrupt MIDDEN in de ROI terwijl de bal
+                 met worpsnelheid vloog. Dan is de bal op de plaat geklapt
+                 en raakte de tracker hem kwijt (stuit richting camera,
+                 bewegingsonscherpte, mislukte koppeling). Impact = het
+                 laatste punt plus een halve stap. Eindigt de baan aan de
+                 rand van ROI of beeld, dan vloog de bal eruit: geen impact.
+
+Bij elke afgewezen baan wordt de reden gelogd (terminal en debug-HUD).
 
 Een baan die zonder omkeren met volle snelheid het beeld verlaat (bal die
 de plaat volledig mist) levert GEEN impact op. Langzame objecten (handen,
@@ -43,6 +51,8 @@ class ImpactDetector:
         # de laatst afgesloten baan. Puur lezen, geen invloed op de logica.
         self.last_blobs = []
         self.last_track = []
+        self.last_reject = None   # waarom de laatste baan geen impact gaf
+        self._shape = None
 
     # ----- publiek -----
 
@@ -50,6 +60,7 @@ class ImpactDetector:
         self.bg = None
         self._track = None
         self._missing = 0
+        self.last_reject = None
 
     def suppress_frames(self, n=None):
         """Roep dit aan direct nadat de projectie verandert."""
@@ -65,6 +76,7 @@ class ImpactDetector:
         else:
             gray = frame
         gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        self._shape = gray.shape
 
         if self.bg is None:
             self.bg = gray.astype(np.float32)
@@ -154,7 +166,10 @@ class ImpactDetector:
         best = None
         best_d = gate
         for (bx, by) in blobs:
-            d = math.hypot(bx - pred[0], by - pred[1])
+            # Zoek zowel rond de voorspelde als rond de laatste positie:
+            # bij een terugstuit klopt de vooruit-voorspelling niet meer.
+            d = min(math.hypot(bx - pred[0], by - pred[1]),
+                    math.hypot(bx - px, by - py))
             if d < best_d:
                 best_d = d
                 best = (bx, by)
@@ -163,14 +178,14 @@ class ImpactDetector:
             self._track.append(best)
             self._missing = 0
             if len(self._track) > config.TRACK_MAX_LEN:
-                return self._finalize()
+                return self._finalize(vanished=False)
             # Online-check: is de terugstuit al zichtbaar? Dan hoeven we
             # niet te wachten tot de bal uit beeld is.
             return self._check_reversal_online()
         else:
             self._missing += 1
             if self._missing > config.TRACK_MISSING_MAX:
-                return self._finalize()
+                return self._finalize(vanished=True)
             return None
 
     def _analyze(self, pts):
@@ -185,6 +200,7 @@ class ImpactDetector:
         aanvliegas stort blijvend in; impact is het verste punt binnen dat
         instortingsvenster."""
         if len(pts) < 3:
+            self.last_reject = f"baan te kort ({len(pts)} punten)"
             return None
         p = np.asarray(pts, dtype=np.float64)
         disp = np.diff(p, axis=0)
@@ -193,6 +209,9 @@ class ImpactDetector:
         v_in = disp[:n_in].mean(axis=0)
         speed_in = float(np.hypot(*v_in))
         if speed_in < config.MIN_INCOMING_SPEED:
+            self.last_reject = (f"te traag voor worp ({speed_in:.0f} "
+                                f"px/frame, minimum "
+                                f"{config.MIN_INCOMING_SPEED})")
             return None
         u = v_in / speed_in
         s = (p - p[0]) @ u
@@ -206,6 +225,7 @@ class ImpactDetector:
                 continue  # jitter, geen echte beweging
             cosang = float(disp[i] @ disp[i + 1]) / (na * nb)
             if cosang < cos_kink and s[i + 1] >= config.MIN_APPROACH_PX:
+                self.last_reject = None
                 return (float(p[i + 1][0]), float(p[i + 1][1]))
 
         # --- Vangnet: blijvende snelheidsinstorting langs de aanvliegas ---
@@ -213,15 +233,20 @@ class ImpactDetector:
         thr = config.STOP_SPEED_FACTOR * speed_in
         slow = np.where(ds < thr)[0]
         if len(slow) == 0:
+            self.last_reject = "geen knik en geen vertraging gezien"
             return None
         j = int(slow[0])
         rest = ds[j:j + 3]
         if len(ds) - j < 2 or rest.mean() >= thr:
-            return None  # even afgeremd maar niet gestopt: geen impact
+            self.last_reject = "even afgeremd maar niet gestopt"
+            return None
         win_end = min(j + 4, len(s))
         k = j + int(np.argmax(s[j:win_end]))
         if s[k] < config.MIN_APPROACH_PX:
+            self.last_reject = (f"te korte aanloop ({s[k]:.0f} px "
+                                f"langs aanvliegas)")
             return None
+        self.last_reject = None
         return (float(p[k][0]), float(p[k][1]))
 
     def _check_reversal_online(self):
@@ -232,13 +257,62 @@ class ImpactDetector:
             self._missing = 0
         return impact
 
-    def _finalize(self):
-        impact = self._analyze(self._track)
-        if self._track:
-            self.last_track = list(self._track)
+    def _finalize(self, vanished=False):
+        pts = self._track or []
+        impact = self._analyze(pts)
+        if impact is None and vanished:
+            impact = self._vanish_impact(pts)
+        if pts:
+            self.last_track = list(pts)
+        if impact is None and len(pts) >= 4 and self.last_reject:
+            print(f"[detector] baan afgewezen ({len(pts)} punten): "
+                  f"{self.last_reject}")
         self._track = None
         self._missing = 0
         return impact
+
+    def _inside(self, pt, marge=10):
+        """Ligt het punt binnen beeld en (indien gezet) binnen de ROI?"""
+        x, y = int(round(pt[0])), int(round(pt[1]))
+        if self._shape is None:
+            return False
+        h, w = self._shape
+        if not (marge <= x < w - marge and marge <= y < h - marge):
+            return False
+        if self.roi_mask is not None:
+            return bool(self.roi_mask[y, x])
+        return True
+
+    def _vanish_impact(self, pts):
+        """Derde criterium: de baan eindigt abrupt midden in de ROI terwijl
+        de bal met worpsnelheid vloog. Dan is de bal op de plaat geklapt en
+        kwijtgeraakt. Impact = laatste punt + halve laatste stap. Eindigt
+        de baan aan de rand (bal vloog eruit), dan geen impact."""
+        if len(pts) < 3:
+            return None
+        p = np.asarray(pts, dtype=np.float64)
+        disp = np.diff(p, axis=0)
+        n_in = min(3, len(disp))
+        v_in = disp[:n_in].mean(axis=0)
+        speed_in = float(np.hypot(*v_in))
+        if speed_in < config.MIN_INCOMING_SPEED:
+            self.last_reject = (f"te traag voor worp "
+                                f"({speed_in:.0f} px/frame)")
+            return None
+        u = v_in / speed_in
+        s = (p - p[0]) @ u
+        if s[-1] < config.MIN_APPROACH_PX:
+            self.last_reject = (f"te korte aanloop "
+                                f"({s[-1]:.0f} px langs aanvliegas)")
+            return None
+        v_last = p[-1] - p[-2]
+        volgend = p[-1] + v_last
+        if not self._inside(p[-1]) or not self._inside(volgend):
+            self.last_reject = "baan verliet ROI/beeld (misser)"
+            return None
+        self.last_reject = None
+        imp = p[-1] + 0.5 * v_last
+        return (float(imp[0]), float(imp[1]))
 
     @property
     def track(self):

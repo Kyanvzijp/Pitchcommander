@@ -104,9 +104,10 @@ def render(hits, strikes, balls, target, hit_count, miss_count):
     label = (f"RAAK: {hit_count}   MIS: {miss_count}" if target is not None
              or hit_count or miss_count
              else f"STRIKES: {strikes}   BALLS: {balls}")
+    # Rechts naast de zone (eronder is geen ruimte meer bij volle hoogte).
     cv2.putText(canvas, label,
-                (config.ZONE_X, config.ZONE_Y + config.ZONE_H + 40),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+                (config.ZONE_X + config.ZONE_W + 24, config.ZONE_Y + 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
     return canvas
 
 
