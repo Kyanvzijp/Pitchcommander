@@ -188,9 +188,15 @@ def main():
             # gooit, dan wordt de bal nooit GEZIEN (licht/drempel) en ligt
             # het niet aan de baananalyse.
             if time.time() - status_t >= 5.0:
+                dg = detector.pop_diag()
                 print(f"status: helderheid {frame.mean():.0f}/255 | "
-                      f"frames met blob (5s): {blob_frames} | "
-                      f"langste baan: {langste_baan}")
+                      f"blob-frames {blob_frames} | baan {langste_baan} | "
+                      f"maxdiff {dg['max_diff']:.0f}"
+                      f"/{config.DIFF_THRESHOLD} | "
+                      f"contouren {dg['contours']} "
+                      f"(grootste {dg['max_area']:.0f}px, "
+                      f"rondste {dg['best_circ']:.2f}) | "
+                      f"onderdrukt {dg['suppressed']}f")
                 status_t = time.time()
                 blob_frames = 0
                 langste_baan = 0

@@ -53,6 +53,11 @@ class ImpactDetector:
         self.last_track = []
         self.last_reject = None   # waarom de laatste baan geen impact gaf
         self._shape = None
+        # Diagnostiek, per statusvenster uit te lezen met pop_diag():
+        # waar sterft het signaal? (verschilwaarde, contourgrootte,
+        # rondheid, onderdrukking)
+        self.diag = {"max_diff": 0.0, "contours": 0, "max_area": 0.0,
+                     "best_circ": 0.0, "suppressed": 0}
 
     # ----- publiek -----
 
@@ -61,6 +66,13 @@ class ImpactDetector:
         self._track = None
         self._missing = 0
         self.last_reject = None
+
+    def pop_diag(self):
+        """Diagnostiek van het afgelopen venster teruggeven en resetten."""
+        d = dict(self.diag)
+        for k in self.diag:
+            self.diag[k] = 0.0 if isinstance(self.diag[k], float) else 0
+        return d
 
     def suppress_frames(self, n=None):
         """Roep dit aan direct nadat de projectie verandert."""
@@ -82,6 +94,8 @@ class ImpactDetector:
             self.bg = gray.astype(np.float32)
             return None
 
+        if self.suppress > 0:
+            self.diag["suppressed"] += 1
         blobs, fg_mask = self._find_ball_blobs(gray)
         self.last_blobs = blobs
         impact = self._update_track(blobs)
@@ -113,10 +127,12 @@ class ImpactDetector:
         """Bal-achtige blobs (rond, juiste grootte) in de ROI.
         Geeft (lijst van zwaartepunten, voorgrondmasker) terug."""
         diff = cv2.absdiff(gray, self.bg.astype(np.uint8))
+        if self.roi_mask is not None:
+            diff = cv2.bitwise_and(diff, diff, mask=self.roi_mask)
+        self.diag["max_diff"] = max(self.diag["max_diff"],
+                                    float(diff.max()))
         _, mask = cv2.threshold(diff, config.DIFF_THRESHOLD, 255,
                                 cv2.THRESH_BINARY)
-        if self.roi_mask is not None:
-            mask = cv2.bitwise_and(mask, self.roi_mask)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,
                                 np.ones((3, 3), np.uint8))
         mask = cv2.dilate(mask, None, iterations=2)
@@ -124,14 +140,18 @@ class ImpactDetector:
         blobs = []
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
                                        cv2.CHAIN_APPROX_SIMPLE)
+        self.diag["contours"] += len(contours)
         for c in contours:
             area = cv2.contourArea(c)
+            self.diag["max_area"] = max(self.diag["max_area"], float(area))
             if not (config.MIN_BLOB_AREA <= area <= config.MAX_BLOB_AREA):
                 continue
             per = cv2.arcLength(c, True)
             if per <= 0:
                 continue
-            if 4.0 * math.pi * area / (per * per) < config.MIN_CIRCULARITY:
+            circ = 4.0 * math.pi * area / (per * per)
+            self.diag["best_circ"] = max(self.diag["best_circ"], circ)
+            if circ < config.MIN_CIRCULARITY:
                 continue
             x, y, w, h = cv2.boundingRect(c)
             if max(w, h) / max(1, min(w, h)) > config.MAX_ASPECT_RATIO:
