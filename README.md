@@ -179,7 +179,8 @@ Cameratest: `rpicam-hello --timeout 2000`
 
 | Probleem | Aanpassing |
 |---|---|
-| Mist zachte worpen | `MIN_INCOMING_SPEED` omlaag |
+| Mist zachte worpen | `MIN_INCOMING_SPEED` omlaag (snelheid = piek over de baan) |
+| IR-lampjes vallen uit bij wisselend beamerlicht | tape over de LDR-sensortjes op de IR-boards |
 | Triggert op snelle handbeweging | `MIN_INCOMING_SPEED` omhoog |
 | Detecteert ruis / projectie | `DIFF_THRESHOLD` omhoog |
 | Mist de bal als blob | `DIFF_THRESHOLD` omlaag, of belichting checken |

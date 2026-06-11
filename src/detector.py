@@ -188,6 +188,28 @@ class ImpactDetector:
                 return self._finalize(vanished=True)
             return None
 
+    def _incoming(self, p, disp):
+        """Aanvliegrichting en snelheidsmaat van een baan.
+
+        Snelheid: het maximum van een 2-frames lopend gemiddelde, dus het
+        SNELSTE stuk van de baan telt. Een bal die traag in beeld komt en
+        versnelt wordt zo niet afgekeurd op zijn eerste stapjes.
+        Richting: van het eerste punt naar het midden van de baan (de
+        aanvliegpoot), stabieler dan alleen de eerste paar stapjes."""
+        speeds = np.hypot(disp[:, 0], disp[:, 1])
+        if len(speeds) >= 2:
+            roll = (speeds[:-1] + speeds[1:]) / 2.0
+            speed = float(roll.max())
+        else:
+            speed = float(speeds.max())
+        mid = max(2, min(len(p) - 1, len(p) // 2))
+        v = p[mid] - p[0]
+        n = float(np.hypot(*v))
+        if n < 1e-6:
+            v = disp[:min(3, len(disp))].mean(axis=0)
+            n = float(np.hypot(*v)) or 1e-6
+        return v / n, speed
+
     def _analyze(self, pts):
         """Geeft het impactpunt of None.
 
@@ -205,15 +227,12 @@ class ImpactDetector:
         p = np.asarray(pts, dtype=np.float64)
         disp = np.diff(p, axis=0)
 
-        n_in = min(3, len(disp))
-        v_in = disp[:n_in].mean(axis=0)
-        speed_in = float(np.hypot(*v_in))
+        u, speed_in = self._incoming(p, disp)
         if speed_in < config.MIN_INCOMING_SPEED:
             self.last_reject = (f"te traag voor worp ({speed_in:.0f} "
-                                f"px/frame, minimum "
+                                f"px/frame piek, minimum "
                                 f"{config.MIN_INCOMING_SPEED})")
             return None
-        u = v_in / speed_in
         s = (p - p[0]) @ u
 
         # --- Primair: knik in de baan ---
@@ -231,14 +250,17 @@ class ImpactDetector:
         # --- Vangnet: blijvende snelheidsinstorting langs de aanvliegas ---
         ds = np.diff(s)
         thr = config.STOP_SPEED_FACTOR * speed_in
-        slow = np.where(ds < thr)[0]
-        if len(slow) == 0:
-            self.last_reject = "geen knik en geen vertraging gezien"
+        # Afsluitende trage staart zoeken: de baan moet eindigen in
+        # aanhoudende vertraging (een trage START die daarna versnelt is
+        # juist normaal voor een binnenkomende bal).
+        j = len(ds)
+        while j > 0 and ds[j - 1] < thr:
+            j -= 1
+        if j == len(ds) or len(ds) - j < 2:
+            self.last_reject = "geen knik en geen aanhoudende vertraging"
             return None
-        j = int(slow[0])
-        rest = ds[j:j + 3]
-        if len(ds) - j < 2 or rest.mean() >= thr:
-            self.last_reject = "even afgeremd maar niet gestopt"
+        if j == 0 or ds[:j].max() < thr:
+            self.last_reject = "nooit op worpsnelheid langs de aanvliegas"
             return None
         win_end = min(j + 4, len(s))
         k = j + int(np.argmax(s[j:win_end]))
@@ -292,14 +314,11 @@ class ImpactDetector:
             return None
         p = np.asarray(pts, dtype=np.float64)
         disp = np.diff(p, axis=0)
-        n_in = min(3, len(disp))
-        v_in = disp[:n_in].mean(axis=0)
-        speed_in = float(np.hypot(*v_in))
+        u, speed_in = self._incoming(p, disp)
         if speed_in < config.MIN_INCOMING_SPEED:
             self.last_reject = (f"te traag voor worp "
-                                f"({speed_in:.0f} px/frame)")
+                                f"({speed_in:.0f} px/frame piek)")
             return None
-        u = v_in / speed_in
         s = (p - p[0]) @ u
         if s[-1] < config.MIN_APPROACH_PX:
             self.last_reject = (f"te korte aanloop "

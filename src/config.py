@@ -38,7 +38,7 @@ CAM_FPS = 58
 CAM_EXPOSURE_US = 6000
 # Versterking (analoge gain) als CAM_EXPOSURE_US vast staat. Hoger = lichter
 # beeld maar meer ruis. 4.0-8.0 is gebruikelijk bij korte sluitertijden.
-CAM_GAIN = 6.0
+CAM_GAIN = 8.0
 
 # Zet op True als je libcamera/picamera2 gebruikt (Pi 5 aanrader).
 # False = OpenCV VideoCapture (USB / oudere setups).
@@ -75,10 +75,13 @@ MAX_ASPECT_RATIO = 2.2
 # baan omkeert (terugstuit) of abrupt stilvalt (dode klap). Pas op dat
 # moment is de bal OP het muurvlak en klopt de homografie-mapping exact.
 #
-# Minimale aanvliegsnelheid in px/frame. Een echte worp haalt op 640x480
-# bij 58 fps al snel 40-100 px/frame; handen en schaduwen blijven daar
-# ruim onder. Dit is het belangrijkste filter tegen valse detecties.
-MIN_INCOMING_SPEED = 18
+# Minimale snelheid in px/frame om als worp te tellen. Gemeten over het
+# SNELSTE stuk van de baan (niet het begin: een bal kan traag in beeld
+# komen en versnellen). Praktijkmeting op deze opstelling: een worp haalt
+# ~16-30 px/frame omdat de camera vrijwel langs de werprichting kijkt;
+# handen en schaduwen blijven onder de ~8. Dit is het belangrijkste
+# filter tegen valse detecties.
+MIN_INCOMING_SPEED = 10
 # Minimale afgelegde weg (px) in beeld voordat iets als worp kan tellen.
 MIN_APPROACH_PX = 40
 # Een impact geeft een abrupte richtingsverandering (knik) in de baan:
