@@ -142,12 +142,31 @@ def main():
     redraw()
     cv2.waitKey(300)
     print("Achtergrond leren, houd de plaat 2 seconden vrij...")
+    frame = None
     for _ in range(int(config.CAM_FPS * 2)):
         ok, frame = cam.read()
         if ok:
             detector.process(lens.correct(frame))
         cv2.waitKey(1)
+    # Helderheidscheck: met een (vrijwel) zwarte projectie en de korte
+    # sluitertijd kan de plaat te donker zijn om de bal te zien. Dit is
+    # HET verschil met debug_view, waar het Tracking-venster licht op de
+    # plaat projecteert.
+    if frame is not None:
+        helder = float(frame.mean())
+        print(f"Beeldhelderheid: {helder:.0f}/255", end=" ")
+        if helder < 35:
+            print("-> TE DONKER: ballen worden zo niet gezien. "
+                  "IR-lampjes aan (tape op de LDR-sensortjes), of "
+                  "CAM_GAIN omhoog in config.py.")
+        elif helder < 60:
+            print("-> aan de donkere kant; IR-verlichting helpt hier.")
+        else:
+            print("-> ok.")
     print("Klaar. r = reset achtergrond | c = wissen | q = stop")
+    status_t = time.time()
+    blob_frames = 0
+    langste_baan = 0
 
     try:
         while True:
@@ -162,6 +181,19 @@ def main():
             frame = lens.correct(frame)
 
             impact = detector.process(frame)
+            if detector.last_blobs:
+                blob_frames += 1
+            langste_baan = max(langste_baan, len(detector.track))
+            # Elke 5 s een statusregel: zie je hier 0 blobs terwijl je
+            # gooit, dan wordt de bal nooit GEZIEN (licht/drempel) en ligt
+            # het niet aan de baananalyse.
+            if time.time() - status_t >= 5.0:
+                print(f"status: helderheid {frame.mean():.0f}/255 | "
+                      f"frames met blob (5s): {blob_frames} | "
+                      f"langste baan: {langste_baan}")
+                status_t = time.time()
+                blob_frames = 0
+                langste_baan = 0
             if impact is not None:
                 bx, by = map_point(H, impact[0], impact[1])
                 strike = in_zone(bx, by)
