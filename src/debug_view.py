@@ -201,12 +201,16 @@ def main():
                       f"-> beamer ({bx:.0f},{by:.0f})")
                 redraw_beamer()
 
-            view = build_tracking_frame(gray, detector, zone_pts, roi_pts,
-                                        impacts_cam, fps, writer is not None)
-            if writer is not None:
-                writer.write(view)
-            if tracking_zichtbaar:
-                cv2.imshow("Tracking", view)
+            # Annoteren kost ~5-8 ms per frame; alleen doen als iemand
+            # kijkt of de opname loopt, anders zakt de framerate onnodig.
+            if tracking_zichtbaar or writer is not None:
+                view = build_tracking_frame(gray, detector, zone_pts,
+                                            roi_pts, impacts_cam, fps,
+                                            writer is not None)
+                if writer is not None:
+                    writer.write(view)
+                if tracking_zichtbaar:
+                    cv2.imshow("Tracking", view)
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):

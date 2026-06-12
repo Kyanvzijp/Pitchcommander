@@ -74,20 +74,28 @@ def main():
 
 
 def _calibrate_and_save(objpoints, imgpoints, dims):
-    K = np.zeros((3, 3))
-    D = np.zeros((4, 1))
-    n = len(objpoints)
-    rvecs = [np.zeros((1, 1, 3), dtype=np.float64) for _ in range(n)]
-    tvecs = [np.zeros((1, 1, 3), dtype=np.float64) for _ in range(n)]
-    flags = (cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC +
-             cv2.fisheye.CALIB_FIX_SKEW)
-    term = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
+    if config.LENS_MODEL == "fisheye":
+        K = np.zeros((3, 3))
+        D = np.zeros((4, 1))
+        n = len(objpoints)
+        rvecs = [np.zeros((1, 1, 3), dtype=np.float64) for _ in range(n)]
+        tvecs = [np.zeros((1, 1, 3), dtype=np.float64) for _ in range(n)]
+        flags = (cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC +
+                 cv2.fisheye.CALIB_FIX_SKEW)
+        term = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
+        rms, _, _, _, _ = cv2.fisheye.calibrate(
+            objpoints, imgpoints, dims, K, D, rvecs, tvecs, flags, term)
+    else:
+        # Standaard (rectilineair) model: GS-camera met 6 mm lens.
+        # Het standaardmodel verwacht objectpunten als (N,3) per beeld.
+        objp = [o.reshape(-1, 3) for o in objpoints]
+        rms, K, D, _, _ = cv2.calibrateCamera(
+            objp, imgpoints, dims, None, None)
 
-    rms, _, _, _, _ = cv2.fisheye.calibrate(
-        objpoints, imgpoints, dims, K, D, rvecs, tvecs, flags, term)
-
-    np.savez(config.LENS_CALIB_FILE, K=K, D=D, dims=np.array(dims))
-    print(f"Kalibratie opgeslagen in {config.LENS_CALIB_FILE} (RMS-fout: {rms:.3f})")
+    np.savez(config.LENS_CALIB_FILE, K=K, D=D, dims=np.array(dims),
+             model=config.LENS_MODEL)
+    print(f"Kalibratie opgeslagen in {config.LENS_CALIB_FILE} "
+          f"(model: {config.LENS_MODEL}, RMS-fout: {rms:.3f})")
 
 
 if __name__ == "__main__":

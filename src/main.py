@@ -196,7 +196,8 @@ def main():
                       f"contouren {dg['contours']} "
                       f"(grootste {dg['max_area']:.0f}px, "
                       f"rondste {dg['best_circ']:.2f}) | "
-                      f"onderdrukt {dg['suppressed']}f")
+                      f"onderdrukt {dg['suppressed']}f | "
+                      f"druk (persoon) {dg['busy']}f")
                 status_t = time.time()
                 blob_frames = 0
                 langste_baan = 0

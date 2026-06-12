@@ -182,6 +182,7 @@ Cameratest: `rpicam-hello --timeout 2000`
 | Mist zachte worpen | `MIN_INCOMING_SPEED` omlaag (snelheid = piek over de baan) |
 | IR-lampjes vallen uit bij wisselend beamerlicht | tape over de LDR-sensortjes op de IR-boards |
 | Triggert op snelle handbeweging | `MIN_INCOMING_SPEED` omhoog |
+| Valse impacts bij ballen rapen / persoon in beeld | gebeurt niet meer: bij >`MAX_SIMULTANEOUS_BLOBS` gelijktijdige blobs gaat de impactbepaling op slot (status toont "druk (persoon)") |
 | Detecteert ruis / projectie | `DIFF_THRESHOLD` omhoog |
 | Mist de bal als blob | `DIFF_THRESHOLD` omlaag, of belichting checken |
 | Beeld te donker (6 ms sluiter) | `CAM_GAIN` omhoog of licht op de plaat |
@@ -202,6 +203,34 @@ Live afstellen zonder herstart kan in `debug_view.py` met de toetsen 1 t/m 4.
 | Schermconfiguratie/resolutie beamer | nee | JA |
 | Zone-afmetingen in config | nee | nee |
 | Detectieparameters | nee | nee |
+
+## Nieuwe camera: HQ Camera (IMX477) + 6 mm lens — checklist
+
+De geleverde camera bleek de HQ Camera (IMX477), niet de Global Shutter.
+Prima nieuws: de 1332x990-modus draait op 120 fps (2x de GS) en is 2x2
+gebinned (4x licht per pixel). Het HQ-profiel staat al ACTIEF in config.
+
+Belangrijk verschil met de oude nachtzichtcamera: de HQ heeft een vast
+infrarood-sperfilter. **De IR-lampjes doen hier dus niets meer**; gebruik
+de spotlight voor belichting van plaat en vliegbaan.
+
+1. Lens direct op de camera (CS-mount, geen adapterring). Diafragma
+   helemaal open.
+2. Spotlight opstellen: van opzij of schuin boven op de plaat gericht,
+   nooit in de lens. `python3 fps_test.py` -> helderheidsoordeel moet
+   minimaal "werkbaar", liefst "GOED" zijn, en check of ~120 fps wordt
+   gehaald.
+3. Scherpstellen via het Tracking-venster van `debug_view.py`:
+   focusring draaien tot de plaat scherp is, borgring vast. De HQ heeft
+   ook een back-focusring; alleen aankomen als scherpstellen met de
+   lensring niet lukt.
+4. `python3 calibrate_lens.py` opnieuw (zelfde geprinte schaakbord;
+   gebruikt nu automatisch het standaardmodel).
+5. `python3 calibrate_homography.py` opnieuw.
+6. Proefworpen met `debug_view.py` + opname; blobgroottes en snelheden
+   checken in de statusregels (bal is ~70 px breed op 2 m).
+
+Het oude OV5647-profiel staat als commentaar in `config.py` als terugval.
 
 ## Bekende beperkingen
 

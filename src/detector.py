@@ -47,6 +47,7 @@ class ImpactDetector:
         self.roi_mask = roi_mask
         self._track = None       # lijst van (x, y) posities
         self._missing = 0
+        self._busy_hold = 0      # poort dicht na drukte (persoon in beeld)
         # Voor visualisatie (debug_view.py): laatst gedetecteerde blobs en
         # de laatst afgesloten baan. Puur lezen, geen invloed op de logica.
         self.last_blobs = []
@@ -57,7 +58,7 @@ class ImpactDetector:
         # waar sterft het signaal? (verschilwaarde, contourgrootte,
         # rondheid, onderdrukking)
         self.diag = {"max_diff": 0.0, "contours": 0, "max_area": 0.0,
-                     "best_circ": 0.0, "suppressed": 0}
+                     "best_circ": 0.0, "suppressed": 0, "busy": 0}
 
     # ----- publiek -----
 
@@ -65,6 +66,7 @@ class ImpactDetector:
         self.bg = None
         self._track = None
         self._missing = 0
+        self._busy_hold = 0
         self.last_reject = None
 
     def pop_diag(self):
@@ -98,7 +100,21 @@ class ImpactDetector:
             self.diag["suppressed"] += 1
         blobs, fg_mask = self._find_ball_blobs(gray)
         self.last_blobs = blobs
-        impact = self._update_track(blobs)
+        if len(blobs) > config.MAX_SIMULTANEOUS_BLOBS:
+            # Te veel gelijktijdige blobs = persoon/arm in beeld. Poort
+            # dicht, en even dicht HOUDEN: een wegtrekkende arm zakt kort
+            # onder de blobdrempel en mag dan geen valse baan starten.
+            self._busy_hold = config.BUSY_HOLD_FRAMES
+            self.last_reject = (f"te druk in beeld ({len(blobs)} blobs "
+                                f"tegelijk): persoon of arm?")
+        if self._busy_hold > 0:
+            self.diag["busy"] += 1
+            self._busy_hold -= 1
+            self._track = None
+            self._missing = 0
+            impact = None
+        else:
+            impact = self._update_track(blobs)
 
         # Achtergrond bijwerken: snel na een projectie-verandering, anders
         # langzaam en niet over voorgrond-objecten heen.
@@ -181,7 +197,15 @@ class ImpactDetector:
             vx = vy = 0.0
         pred = (px + vx, py + vy)
         speed = math.hypot(vx, vy)
-        gate = max(80.0, 2.5 * speed)
+        # Koppelvenster schaalt met de beeldbreedte: op hogere resoluties
+        # verplaatst een bal meer pixels per frame. Bij een baan van 1 punt
+        # is er nog geen snelheid bekend, dan extra ruim zoeken.
+        base_gate = max(80.0, 0.15 * (self._shape[1] if self._shape
+                                      else 640))
+        if len(self._track) == 1:
+            gate = 2.0 * base_gate
+        else:
+            gate = max(base_gate, 2.5 * speed)
 
         best = None
         best_d = gate

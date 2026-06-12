@@ -21,6 +21,13 @@ class LensCorrector:
         K = data["K"]
         D = data["D"]
         dims = tuple(int(x) for x in data["dims"])
+        # Oude kalibratiebestanden hebben geen modelveld: die zijn fisheye.
+        model = str(data["model"]) if "model" in data else "fisheye"
+        if model != config.LENS_MODEL:
+            print(f"WAARSCHUWING: lens_calib.npz is een {model}-kalibratie "
+                  f"maar config.LENS_MODEL = {config.LENS_MODEL}. "
+                  f"Correctie staat UIT; draai calibrate_lens.py opnieuw.")
+            return
         if dims != (config.CAM_WIDTH, config.CAM_HEIGHT):
             # De kalibratie is op een andere resolutie gemaakt. Domweg
             # schalen is riskant: verschillende sensormodi van de OV5647
@@ -35,10 +42,15 @@ class LensCorrector:
                   f"opnieuw op deze resolutie.")
             return
         # Nieuwe cameramatrix die zoveel mogelijk beeld behoudt.
-        new_K = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(
-            K, D, dims, np.eye(3), balance=0.0)
-        self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
-            K, D, np.eye(3), new_K, dims, cv2.CV_16SC2)
+        if model == "fisheye":
+            new_K = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(
+                K, D, dims, np.eye(3), balance=0.0)
+            self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
+                K, D, np.eye(3), new_K, dims, cv2.CV_16SC2)
+        else:  # standaard (rectilineair) model, b.v. de 6 mm GS-lens
+            new_K, _ = cv2.getOptimalNewCameraMatrix(K, D, dims, 0, dims)
+            self.map1, self.map2 = cv2.initUndistortRectifyMap(
+                K, D, None, new_K, dims, cv2.CV_16SC2)
         self.enabled = True
 
     def correct(self, frame):
